@@ -1,0 +1,79 @@
+{
+  "expo": {
+    "name": "Cartogrammm",
+    "slug": "cartogrammm",
+    "version": "1.0.0",
+    "scheme": "cartogrammm",
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ],
+    "ios": {
+      "bundleIdentifier": "com.cartogrammm.app",
+      "supportsTablet": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "buildNumber": "13"
+    },
+    "android": {
+      "package": "com.cartogrammm.app",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyDwr1GcMpPJxD-ThAFmxVB7Ua6HFBuUUDw"
+        }
+      },
+      "versionCode": 10
+    },
+    "web": {
+      "bundler": "metro",
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyDwr1GcMpPJxD-ThAFmxVB7Ua6HFBuUUDw"
+        }
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-web-browser",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Cartogrammm to access your camera to take photos for your contributions.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#ffffff",
+          "sounds": []
+        }
+      ],
+      "./plugins/withNonModularHeaders",
+      "@react-native-community/datetimepicker",
+      "expo-build-properties",
+      "expo-font",
+      "expo-image",
+      "expo-sharing",
+      "expo-splash-screen",
+      "expo-status-bar",
+      [
+        "react-native-maps",
+        {
+          "iosGoogleMapsApiKey": "AIzaSyDwr1GcMpPJxD-ThAFmxVB7Ua6HFBuUUDw"
+        }
+      ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "8de58e7a-a629-4287-9ae9-3b3764212fb1"
+      }
+    },
+    "owner": "cartogrammm"
+  }
+}

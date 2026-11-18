@@ -1,0 +1,1146 @@
+﻿diff --git a/app/project-info.tsx b/app/project-info.tsx
+index a78f03a..7cad6ad 100644
+--- a/app/project-info.tsx
++++ b/app/project-info.tsx
+@@ -1,21 +1,7 @@
+ import { Ionicons } from "@expo/vector-icons";
+ import { useLocalSearchParams, useRouter } from "expo-router";
+ import React, { useEffect, useMemo, useRef, useState } from "react";
+-import {
+-    ActivityIndicator,
+-    Alert,
+-    Image,
+-    KeyboardAvoidingView,
+-    Modal,
+-    Platform,
+-    Pressable,
+-    ScrollView,
+-    StyleSheet,
+-    Switch,
+-    Text,
+-    TextInput,
+-    View
+-} from "react-native";
++import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
+ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+ 
+ import * as FileSystem from 'expo-file-system/legacy';
+@@ -24,10 +10,12 @@ import * as Sharing from 'expo-sharing';
+ 
+ import { onValue, ref, remove, set, update } from "firebase/database";
+ import MapView, { Polygon, PROVIDER_GOOGLE } from '../components/Maps';
+-import { useTheme } from '../components/ThemeContext';
++import { useTheme, DS } from '../components/ThemeContext';
+ import UserAvatar from '../components/UserAvatar';
+ import { auth, db } from "../src/firebase/config";
+ import { GeminiService } from '../src/services/GeminiService';
++import { ThemeText } from '../components/ThemeText';
++import { ThemeTextInput } from '../components/ThemeTextInput';
+ 
+ const cartogrammMapStyle = [
+     { "elementType": "geometry", "stylers": [{ "color": "#F5F3EE" }] },
+@@ -137,11 +125,45 @@ export default function ProjectInfo() {
+ 
+     const [loading, setLoading] = useState(true);
+     const [project, setProject] = useState<any>(null);
+-    const [members, setMembers] = useState<any[]>([]);
++    const [Members, setMembers] = useState<any[]>([]);
+     const [joinRequests, setJoinRequests] = useState<any[]>([]);
+-    const [contributionsMap, setContributionsMap] = useState<Record<string, number>>({});
++    
+     const [rawEntries, setRawEntries] = useState<Record<string, any>>({});
+-    const [insights, setInsights] = useState<string | null>(null);
++    
++    const filteredRawEntries = useMemo(() => {
++        if (!project || !rawEntries) return rawEntries;
++        if (!project.isTimeStampEnabled || !project.timeStampDuration) return rawEntries;
++
++        const filtered: Record<string, any> = {};
++        const now = Date.now();
++        let cutoff = now;
++        if (project.timeStampDuration === '1_week') cutoff = now - 7 * 24 * 60 * 60 * 1000;
++        else if (project.timeStampDuration === '1_month') cutoff = now - 30 * 24 * 60 * 60 * 1000;
++        else if (project.timeStampDuration === '3_months') cutoff = now - 90 * 24 * 60 * 60 * 1000;
++        else if (project.timeStampDuration === '1_year') cutoff = now - 365 * 24 * 60 * 60 * 1000;
++
++        for (const key in rawEntries) {
++            const entry = rawEntries[key];
++            const entryDate = new Date(entry.createdAt || entry.timestamp).getTime();
++            if (isNaN(entryDate) || entryDate >= cutoff) {
++                filtered[key] = entry;
++            }
++        }
++        return filtered;
++    }, [rawEntries, project]);
++
++    const contributionsMap = useMemo(() => {
++        const counts: Record<string, number> = {};
++        for (const entryId in filteredRawEntries) {
++            const authorId = filteredRawEntries[entryId].createdBy || filteredRawEntries[entryId].userId;
++            if (authorId) {
++                counts[authorId] = (counts[authorId] || 0) + 1;
++            }
++        }
++        return counts;
++    }, [filteredRawEntries]);
++
++    const [Insights, setInsights] = useState<string | null>(null);
+     const [generatingInsights, setGeneratingInsights] = useState(false);
+ 
+     const areaCoords = useMemo(() => {
+@@ -172,16 +194,32 @@ export default function ProjectInfo() {
+ 
+     const [editModalVisible, setEditModalVisible] = useState(false);
+     const [manageRolesModalVisible, setManageRolesModalVisible] = useState(false);
++    
++    // Mapping Challenge State
++    const [challengeModalVisible, setChallengeModalVisible] = useState(false);
++    const [challengeTitle, setChallengeTitle] = useState("");
++    const [challengeDuration, setChallengeDuration] = useState("1");
++    const [challengeUnit, setChallengeUnit] = useState<"mins" | "hours" | "days" | "months">("days");
++    const [activeChallengeId, setActiveChallengeId] = useState<string | null>(null);
++    const [activeChallenge, setActiveChallenge] = useState<any>(null);
++    const [pastChallengesCount, setPastChallengesCount] = useState(0);
++    const [pastChallenges, setPastChallenges] = useState<any[]>([]);
++    const [pastChallengesModalVisible, setPastChallengesModalVisible] = useState(false);
+ 
+     const [editName, setEditName] = useState("");
+     const [editDesc, setEditDesc] = useState("");
+     const [editIsPublic, setEditIsPublic] = useState(false);
+ 
+     const [graphRange, setGraphRange] = useState<"daily" | "weekly" | "monthly" | "yearly">("daily");
++    const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
++
++    const toggleCategory = (id: string) => {
++        setExpandedCategories(prev => ({ ...prev, [id]: !prev[id] }));
++    };
+ 
+     const graphData = useMemo(() => {
+         if (!rawEntries) return [];
+-        const entries = Object.values(rawEntries).map(e => ({
++        const entries = Object.values(filteredRawEntries).map(e => ({
+             ...e,
+             date: e.createdAt || e.timestamp || e.date || 0
+         })).filter(e => e.date !== 0);
+@@ -237,23 +275,66 @@ export default function ProjectInfo() {
+             });
+         }
+         return buckets;
+-    }, [rawEntries, graphRange]);
++    }, [filteredRawEntries, graphRange]);
+ 
+     const categoryStats = useMemo(() => {
+-        const stats: Record<string, { count: number, name: string, icon: string, color: string }> = {};
++        const stats: Record<string, { id: string, count: number, name: string, icon: string, color: string, parentId?: string }> = {};
+         if (project?.categories) {
+-            project.categories.forEach((c: any) => {
+-                stats[c.id || c.name] = { count: 0, name: c.name, icon: c.icon, color: c.color };
++            const cats = Array.isArray(project.categories) 
++                ? project.categories 
++                : Object.entries(project.categories).map(([k, v]: [string, any]) => ({ id: k, ...v }));
++            cats.forEach((c: any) => {
++                const nameKey = (c.name || c.label || "").toLowerCase();
++                if (nameKey) {
++                    stats[nameKey] = { id: c.id || nameKey, count: 0, name: c.name || c.label, icon: c.icon, color: c.color, parentId: c.parentId };
++                }
+             });
+         }
+-        Object.values(rawEntries).forEach((e: any) => {
+-            const catId = e.categoryId || e.category;
+-            if (catId && stats[catId]) {
+-                stats[catId].count++;
++        Object.values(filteredRawEntries).forEach((e: any) => {
++            const catName = (e.category || e.categoryId || "").toLowerCase();
++            if (catName && stats[catName]) {
++                stats[catName].count++;
++            }
++            if (e.tags && Array.isArray(e.tags)) {
++                e.tags.forEach((t: any) => {
++                    const tName = (t.name || t.label || "").toLowerCase();
++                    if (tName && stats[tName]) {
++                        stats[tName].count++;
++                    }
++                });
+             }
+         });
+-        return Object.values(stats);
+-    }, [project, rawEntries]);
++        
++        const rawStats = Object.values(stats);
++        
++        // Normalize parentId to always be the parent's actual ID
++        rawStats.forEach(t => {
++            if (t.parentId) {
++                const parentByName = rawStats.find(p => p.id === t.parentId || p.name.toLowerCase() === t.parentId!.toLowerCase());
++                if (parentByName) {
++                    t.parentId = parentByName.id;
++                }
++            }
++        });
++
++        const parents = rawStats.filter(t => !t.parentId);
++        parents.sort((a, b) => b.count - a.count);
++        
++        const sorted: typeof rawStats = [];
++        parents.forEach(p => {
++          sorted.push(p);
++          if (p.id) {
++            const children = rawStats.filter(t => t.parentId === p.id);
++            children.sort((a, b) => b.count - a.count);
++            sorted.push(...children);
++          }
++        });
++        rawStats.forEach(t => {
++          if (!sorted.includes(t)) sorted.push(t);
++        });
++        
++        return sorted;
++    }, [project?.categories, filteredRawEntries]);
+ 
+     useEffect(() => {
+         if (!projectId) return;
+@@ -300,7 +381,7 @@ export default function ProjectInfo() {
+                 setProject(data);
+ 
+                 const ownerId = data.ownerId;
+-                const myRole = data.members?.[currentUid] || "member";
++                const myRole = data.Members?.[currentUid] || "member";
+ 
+                 const isUserOwner = ownerId === currentUid;
+                 const isUserAdmin = myRole === "admin" || isUserOwner;
+@@ -310,8 +391,8 @@ export default function ProjectInfo() {
+                 setCurrentUserRole(isUserOwner ? "owner" : myRole);
+ 
+                 const memList = [];
+-                if (data.members) {
+-                    for (const [uid, role] of Object.entries(data.members)) {
++                if (data.Members) {
++                    for (const [uid, role] of Object.entries(data.Members)) {
+                         memList.push({
+                             uid,
+                             role: uid === ownerId ? "owner" : (role as string),
+@@ -358,17 +439,10 @@ export default function ProjectInfo() {
+             if (snap.exists()) {
+                 const data = snap.val();
+                 setRawEntries(data);
+-                const counts: Record<string, number> = {};
+-                for (const entryId in data) {
+-                    const authorId = data[entryId].userId;
+-                    if (authorId) {
+-                        counts[authorId] = (counts[authorId] || 0) + 1;
+-                    }
+-                }
+-                setContributionsMap(counts);
++
+             } else {
+                 setRawEntries({});
+-                setContributionsMap({});
++                
+             }
+         });
+ 
+@@ -378,6 +452,48 @@ export default function ProjectInfo() {
+         };
+     }, [projectId]);
+ 
++    const [isDeleting, setIsDeleting] = useState(false);
++
++    const handleDeleteProject = async () => {
++        if (!projectId) return;
++        setIsDeleting(true);
++        try {
++            const { ProjectService } = require('../src/services/ProjectService');
++            await ProjectService.deleteProjectEverywhere(projectId as string);
++            
++            try {
++                const AsyncStorage = require('@react-native-async-storage/async-storage').default;
++                const lastActive = await AsyncStorage.getItem("lastActiveProject");
++                if (lastActive === projectId) {
++                    await AsyncStorage.removeItem("lastActiveProject");
++                }
++                const existing = await AsyncStorage.getItem("projects");
++                if (existing) {
++                    const localProjects = JSON.parse(existing);
++                    const updated = localProjects.filter((lp: any) => lp.id !== projectId && lp.key !== projectId);
++                    await AsyncStorage.setItem("projects", JSON.stringify(updated));
++                }
++            } catch (e) {
++                console.warn("Storage clean up failed", e);
++            }
++
++            if (Platform.OS === 'web') {
++                window.alert("Project deleted.");
++            } else {
++                Alert.alert("Success", "Project deleted successfully.");
++            }
++            router.replace("/(tabs)/library");
++        } catch (e: any) {
++            if (Platform.OS === 'web') {
++                window.alert("Failed to delete project: " + e.message);
++            } else {
++                Alert.alert("Error", "Failed to delete project: " + e.message);
++            }
++        } finally {
++            setIsDeleting(false);
++        }
++    };
++
+     const handleSaveEdit = async () => {
+         try {
+             await update(ref(db, `projects/${projectId}`), {
+@@ -400,7 +516,7 @@ export default function ProjectInfo() {
+                 style: "destructive",
+                 onPress: async () => {
+                     try {
+-                        await remove(ref(db, `projects/${projectId}/members/${uid}`));
++                        await remove(ref(db, `projects/${projectId}/Members/${uid}`));
+                         await remove(ref(db, `users/${uid}/joinedProjects/${projectId}`));
+                     } catch (e) {
+                         Alert.alert("Error", "Could not remove member.");
+@@ -413,7 +529,7 @@ export default function ProjectInfo() {
+     const toggleRole = async (uid: string, currentRole: string) => {
+         const newRole = currentRole === "admin" ? "collaborator" : "admin";
+         try {
+-            await set(ref(db, `projects/${projectId}/members/${uid}`), newRole);
++            await set(ref(db, `projects/${projectId}/Members/${uid}`), newRole);
+             await set(ref(db, `users/${uid}/joinedProjects/${projectId}/role`), newRole);
+         } catch (e) {
+             Alert.alert("Error", "Could not update role.");
+@@ -422,11 +538,11 @@ export default function ProjectInfo() {
+ 
+     const handleApproveRequest = async (reqUid: string, reqName: string) => {
+         try {
+-            await set(ref(db, `projects/${projectId}/members/${reqUid}`), "collaborator");
++            await set(ref(db, `projects/${projectId}/Members/${reqUid}`), "collaborator");
+             await set(ref(db, `projects/${projectId}/memberJoinDates/${reqUid}`), new Date().toLocaleDateString());
+-            await set(ref(db, `users/${reqUid}/joinedProjects/${projectId}`), { 
+-                role: "collaborator", 
+-                title: project?.name || "Shared Project" 
++            await set(ref(db, `users/${reqUid}/joinedProjects/${projectId}`), {
++                role: "collaborator",
++                title: project?.name || "Shared Project"
+             });
+             try {
+                 const { ChatService } = require('../src/services/ChatService');
+@@ -452,19 +568,53 @@ export default function ProjectInfo() {
+ 
+     const exportData = async () => {
+         try {
+-            let csvContent = `Project Name:,${(project.name || "").replace(/"/g, '""')}\n`;
+-            csvContent += `Description:,${(project.description || "").replace(/"/g, '""')}\n\n`;
++            let csvContent = "User Name,Entry Description,Categories,Main Category,Time Stamp,Location,Image URL\n";
+ 
+-            csvContent += "MEMBERS\n";
+-            csvContent += "User ID,Role,Date Joined,Posts\n";
+-            members.forEach(m => {
+-                csvContent += `"${m.uid}","${m.role}","${m.dateJoined}","${contributionsMap[m.uid] || 0}"\n`;
++            const cats = Array.isArray(project.categories) ? project.categories : Object.values(project.categories || {});
++            const catMap = new Map();
++            cats.forEach((c: any) => {
++                if (c && (c.id || c.name || c.label)) {
++                    catMap.set((c.name || c.label || c.id).toLowerCase(), c);
++                }
+             });
+ 
+-            csvContent += "\nENTRIES\n";
+-            csvContent += "Entry ID,User ID,Title,Description,Latitude,Longitude,Timestamp\n";
+-            for (const [entryId, entry] of Object.entries(rawEntries)) {
+-                csvContent += `"${entryId}","${entry.userId || ""}","${(entry.title || "").replace(/"/g, '""')}","${(entry.description || "").replace(/"/g, '""')}","${entry.location?.latitude || ""}","${entry.location?.longitude || ""}","${entry.timestamp || ""}"\n`;
++            for (const [entryId, entry] of Object.entries(filteredRawEntries)) {
++                const uid = entry.createdBy || entry.userId;
++                const member = Members.find(m => m.uid === uid);
++                const userName = member ? (member.displayName || member.username || uid) : (uid || "");
++                const description = entry.description || "";
++                const category = entry.category || "";
++                const imageUrl = entry.imageUrl || "";
++                let formattedTime = "";
++                const rawTime = entry.createdAt || entry.timestamp || entry.date || "";
++                if (rawTime) {
++                    const dateObj = new Date(typeof rawTime === 'string' && !isNaN(Number(rawTime)) ? Number(rawTime) : rawTime);
++                    if (!isNaN(dateObj.getTime())) {
++                        formattedTime = dateObj.toLocaleString(); // converts to local date/time format
++                    } else {
++                        formattedTime = rawTime.toString();
++                    }
++                }
++
++                const latitude = entry.latitude !== undefined ? entry.latitude : (entry.location?.latitude || "");
++                const longitude = entry.longitude !== undefined ? entry.longitude : (entry.location?.longitude || "");
++                const location = latitude !== "" && longitude !== "" ? `${latitude}, ${longitude}` : "";
++
++                let mainCategory = "";
++                const catLower = category.toLowerCase();
++                const matchedCat = catMap.get(catLower) || cats.find((c:any) => (c.name || c.label || "").toLowerCase() === catLower);
++                if (matchedCat && matchedCat.parentId) {
++                    const parent = catMap.get(matchedCat.parentId.toLowerCase()) || cats.find((c:any) => c.id === matchedCat.parentId || (c.name || c.label || "").toLowerCase() === matchedCat.parentId.toLowerCase());
++                    if (parent) {
++                        mainCategory = parent.name || parent.label || "";
++                    } else {
++                        mainCategory = matchedCat.parentId;
++                    }
++                } else if (matchedCat && !matchedCat.parentId) {
++                    mainCategory = category;
++                }
++
++                csvContent += `"${userName.replace(/"/g, '""')}","${description.replace(/"/g, '""')}","${category.replace(/"/g, '""')}","${mainCategory.replace(/"/g, '""')}","${formattedTime}","${location}","${imageUrl.replace(/"/g, '""')}"\n`;
+             }
+ 
+             const fileUri = FileSystem.documentDirectory + `${(project.name || "Project").replace(/\s+/g, '_')}_Export.csv`;
+@@ -475,20 +625,111 @@ export default function ProjectInfo() {
+         }
+     };
+ 
++    useEffect(() => {
++        if (!projectId) return;
++        const challengesRef = ref(db, `projects/${projectId}/activeChallenges`);
++        const unsub = onValue(challengesRef, (snap) => {
++            if (snap.exists()) {
++                const val = snap.val();
++                let active = null;
++                let activeObj = null;
++                let pastCount = 0;
++                let pastList: any[] = [];
++                for (const key of Object.keys(val)) {
++                    if (val[key].status === 'active' && val[key].expiresAt > Date.now()) {
++                        active = key;
++                        activeObj = { id: key, ...val[key] };
++                    } else {
++                        pastCount++;
++                        pastList.push({ id: key, ...val[key] });
++                    }
++                }
++                setActiveChallengeId(active);
++                setActiveChallenge(activeObj);
++                setPastChallengesCount(pastCount);
++                setPastChallenges(pastList);
++            } else {
++                setActiveChallengeId(null);
++                setActiveChallenge(null);
++                setPastChallengesCount(0);
++                setPastChallenges([]);
++            }
++        });
++        return () => unsub();
++    }, [projectId]);
++
++    const cancelMappingChallenge = async () => {
++        if (!projectId || !activeChallengeId) return;
++        Alert.alert("Cancel Challenge", "Are you sure you want to end the active mapping challenge?", [
++            { text: "No", style: "cancel" },
++            {
++                text: "Yes, End It",
++                style: "destructive",
++                onPress: async () => {
++                    try {
++                        await update(ref(db, `projects/${projectId}/activeChallenges/${activeChallengeId}`), {
++                            status: "cancelled",
++                            expiresAt: Date.now()
++                        });
++                        Alert.alert("Success", "Challenge ended.");
++                    } catch (e: any) {
++                        Alert.alert("Error", "Could not end challenge: " + e.message);
++                    }
++                }
++            }
++        ]);
++    };
++
++    const activateMappingChallenge = async () => {
++        if (!projectId) return;
++        const pushId = Date.now().toString();
++        
++        let multiplier = 1000 * 60; // default mins
++        if (challengeUnit === "hours") multiplier = 1000 * 60 * 60;
++        else if (challengeUnit === "days") multiplier = 1000 * 60 * 60 * 24;
++        else if (challengeUnit === "months") multiplier = 1000 * 60 * 60 * 24 * 30; // roughly 30 days
++        
++        const durationValue = parseFloat(challengeDuration) || 1;
++        const expirationMs = Date.now() + (durationValue * multiplier);
++        
++        try {
++            // Write to activeChallenges
++            await set(ref(db, `projects/${projectId}/activeChallenges/${pushId}`), {
++                title: challengeTitle.trim() || "Mapping Challenge",
++                status: "active",
++                createdAt: Date.now(),
++                expiresAt: expirationMs
++            });
++            // Send notification to project Members
++            await set(ref(db, `projects/${projectId}/notifications/${pushId}`), {
++                title: challengeTitle.trim() || "Mapping Challenge",
++                message: "A new mapping challenge has started!",
++                type: "challenge",
++                timestamp: Date.now(),
++                senderName: "Project Admin",
++                senderId: auth.currentUser?.uid || "admin"
++            });
++            setChallengeModalVisible(false);
++            Alert.alert("Success", "Mapping Challenge activated!");
++        } catch (e: any) {
++            Alert.alert("Error", "Could not activate mapping challenge: " + e.message);
++        }
++    };
++
+     const handleGenerateInsights = async () => {
+         if (!project) return;
+         setGeneratingInsights(true);
+         try {
+             const entriesData = Object.keys(rawEntries).map(k => ({ id: k, ...rawEntries[k] }));
+             if (entriesData.length === 0) {
+-                Alert.alert("Not Enough Data", "Add some entries to this project before generating insights.");
++                Alert.alert("Not Enough Data", "Add some entries to this project before generating Insights.");
+                 setGeneratingInsights(false);
+                 return;
+             }
+             const result = await GeminiService.generateInsights(project, entriesData);
+             setInsights(result);
+         } catch (e: any) {
+-            Alert.alert("AI Error", e.message || "Failed to generate insights.");
++            Alert.alert("AI Error", e.message || "Failed to generate Insights.");
+         } finally {
+             setGeneratingInsights(false);
+         }
+@@ -504,16 +745,16 @@ export default function ProjectInfo() {
+ 
+     if (!project) return null;
+ 
+-    const totalPosts = Object.keys(rawEntries).length;
++    const totalPosts = Object.keys(filteredRawEntries).length;
+ 
+-    const activeMembers = members.filter(m => contributionsMap[m.uid] > 0).length;
++    const activeMembers = Members.filter(m => contributionsMap[m.uid] > 0).length;
+ 
+     let topContributor = "None";
+     let maxPosts = 0;
+     for (const [uid, count] of Object.entries(contributionsMap)) {
+         if (count > maxPosts) {
+             maxPosts = count;
+-            const memberObj = members.find(m => m.uid === uid);
++            const memberObj = Members.find(m => m.uid === uid);
+             const userStr = uid === auth.currentUser?.uid ? "You" : (memberObj ? (memberObj.displayName || memberObj.username) : `User ${uid.substring(0, 6)}`);
+             topContributor = `${userStr} (${count})`;
+         }
+@@ -525,45 +766,66 @@ export default function ProjectInfo() {
+                 <Pressable style={styles.headerBtn} onPress={() => router.back()}>
+                     <Ionicons name="chevron-back" size={24} color={BW.text} />
+                 </Pressable>
+-                <Text style={styles.headerTitle}>Dashboard</Text>
++                <ThemeText style={styles.headerTitle}>Dashboard</ThemeText>
+                 <View style={{ width: 40 }} />
+             </View>
+ 
+             <ScrollView contentContainerStyle={styles.content}>
+-                {/* SECTION 1: PROJECT INFO */}
+-                <View style={styles.sectionHeader}>
+-                    <Text style={styles.sectionTitle}>{project.name}</Text>
+-                    {isAdmin && (
+-                        <Pressable style={styles.editBtn} onPress={() => router.push({ pathname: '/new-project', params: { projectId } })}>
+-                            <Ionicons name="pencil" size={14} color="#000" />
+-                            <Text style={styles.editBtnText}>Edit</Text>
+-                        </Pressable>
+-                    )}
+-                </View>
+-
+                 <View style={styles.card}>
+-                    {project.image && <Image source={{ uri: project.image }} style={styles.bannerImage} />}
++                    <View style={{ position: 'relative' }}>
++                        {project.image && <Image source={{ uri: project.image }} style={styles.bannerImage} />}
++                        <View style={{ position: 'absolute', bottom: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
++                            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.65)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, gap: 4 }}>
++                                <Ionicons name="people-outline" size={14} color="#fff" />
++                                <ThemeText style={{ color: '#fff', fontSize: 12, fontFamily: DS.typography.chip.fontFamily }}>
++                                    {Members.length}
++                                </ThemeText>
++                            </View>
++                            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.65)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, gap: 4 }}>
++                                <Ionicons name="location-outline" size={14} color="#fff" />
++                                <ThemeText style={{ color: '#fff', fontSize: 12, fontFamily: DS.typography.chip.fontFamily }}>
++                                    {totalPosts}
++                                </ThemeText>
++                            </View>
++                        </View>
++                    </View>
+                     <View style={styles.cardBody}>
+-                        <ProjectLocationText area={project.area} fallbackName={project.locationName} />
+-                        <Text style={styles.projDesc}>{project.description || "No description provided."}</Text>
+-
+-                        <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginTop: 12 }}>
+-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+-                                <Ionicons name={project.isPublic ? "globe" : "lock-closed"} size={16} color={BW.muted} />
+-                                <Text style={{ fontSize: 14, fontWeight: '600', color: BW.muted }}>{project.isPublic ? "Public" : "Private"}</Text>
++                        {/* Title and stats summary */}
++                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
++                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, paddingRight: 8 }}>
++                                <ThemeText style={{ ...DS.typography.h1, color: BW.text }} numberOfLines={2}>{project.name}</ThemeText>
+                             </View>
+-                            <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: BW.muted2 }} />
+-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+-                                <Ionicons name="people-outline" size={16} color={BW.muted} />
+-                                <Text style={{ fontSize: 14, fontWeight: '600', color: BW.muted }}>{members.length}</Text>
++                        </View>
++
++                        {/* Location & Time first */}
++                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
++                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flex: 1, paddingRight: 8 }}>
++                                <Ionicons name="location" size={13} color={BW.muted} />
++                                <ProjectLocationText area={project.area} fallbackName={project.locationName} />
+                             </View>
+-                            <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: BW.muted2 }} />
+-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+-                                <Ionicons name="images-outline" size={16} color={BW.muted} />
+-                                <Text style={{ fontSize: 14, fontWeight: '600', color: BW.muted }}>{totalPosts}</Text>
++                            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: (project.color || '#0b57d0') + '1A', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, gap: 4 }}>
++                                <Ionicons name={project.isPublic ? "globe-outline" : "lock-closed-outline"} size={11} color={project.color || '#0b57d0'} />
++                                <ThemeText style={{ fontSize: 10, fontFamily: DS.typography.chip.fontFamily, color: project.color || '#0b57d0', textTransform: 'uppercase' }}>
++                                    {project.isPublic ? 'Public' : 'Private'}
++                                </ThemeText>
+                             </View>
+                         </View>
+ 
++                        {/* Description second */}
++                        <ThemeText style={{ ...DS.typography.body, color: BW.muted, marginTop: 8 }}>
++                            {project.description || "No description provided."}
++                        </ThemeText>
++
++                        {/* Edit button */}
++                        {isAdmin && (
++                            <View style={{ flexDirection: 'row', marginTop: 12 }}>
++                                <Pressable style={[styles.editBtn, { backgroundColor: BW.btn, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 }]} onPress={() => router.push({ pathname: '/new-project', params: { projectId } })}>
++                                    <Ionicons name="pencil" size={14} color={BW.btnText} />
++                                    <ThemeText style={[styles.editBtnText, { color: BW.btnText, fontSize: 13 }]}>Edit</ThemeText>
++                                </Pressable>
++                            </View>
++                        )}
++
+                         {areaCoords.length > 0 && (
+                             <View style={[styles.mapContainer, { marginTop: 20 }]}>
+                                 <MapView
+@@ -582,49 +844,113 @@ export default function ProjectInfo() {
+                     </View>
+                 </View>
+ 
++                {/* CHALLENGES SECTION */}
++                {isAdmin && (
++                    <>
++                        <View style={[styles.sectionHeader, { marginTop: 30 }]}>
++                            <ThemeText style={styles.sectionTitle}>Challenges</ThemeText>
++                        </View>
++                        <View style={{ marginBottom: 12 }}>
++                            {activeChallengeId ? (
++                                <View>
++                                    {activeChallenge && (
++                                        <ThemeText style={{ textAlign: 'center', marginTop: 12, fontWeight: 'bold', color: BW.text }}>
++                                            Active Challenge: {activeChallenge.title}
++                                        </ThemeText>
++                                    )}
++                                    <Pressable 
++                                        style={[styles.exportBtn, { backgroundColor: '#F44336', borderColor: '#F44336', marginTop: 8 }]} 
++                                        onPress={cancelMappingChallenge}
++                                    >
++                                        <ThemeText style={[styles.exportBtnText, { color: '#FFF' }]}>Cancel Mapping Challenge</ThemeText>
++                                    </Pressable>
++                                </View>
++                            ) : (
++                                <View>
++                                    <Pressable 
++                                        style={[styles.exportBtn, { backgroundColor: '#4CAF50', borderColor: '#4CAF50', marginTop: 12 }]} 
++                                        onPress={() => setChallengeModalVisible(true)}
++                                    >
++                                        <ThemeText style={[styles.exportBtnText, { color: '#FFF' }]}>Start Mapping Challenge</ThemeText>
++                                    </Pressable>
++                                </View>
++                            )}
++                            {pastChallengesCount > 0 && (
++                                <Pressable onPress={() => setPastChallengesModalVisible(true)} style={{ marginTop: 16 }}>
++                                    <ThemeText style={{ textAlign: 'center', color: BW.text, fontSize: 12, fontWeight: 'bold' }}>
++                                        View {pastChallengesCount} past {pastChallengesCount === 1 ? 'challenge' : 'challenges'}
++                                    </ThemeText>
++                                </Pressable>
++                            )}
++                        </View>
++                    </>
++                )}
++
+                 {/* SECTION 3: CATEGORIES */}
+                 <View style={[styles.sectionHeader, { marginTop: 30 }]}>
+-                    <Text style={styles.sectionTitle}>Categories</Text>
++                    <ThemeText style={styles.sectionTitle}>Categories</ThemeText>
+                 </View>
+ 
+                 <View style={styles.tableCard}>
+                     <View style={styles.tableHeader}>
+-                        <Text style={[styles.th, { flex: 2 }]} numberOfLines={1}>Category</Text>
+-                        <Text style={[styles.th, { flex: 1, textAlign: 'center' }]} numberOfLines={1}>Entries</Text>
++                        <ThemeText style={[styles.th, { flex: 2 }]} numberOfLines={1}>Category</ThemeText>
++                        <ThemeText style={[styles.th, { flex: 1, textAlign: 'center' }]} numberOfLines={1}>Entries</ThemeText>
+                     </View>
+-                    {categoryStats.map((c: any, idx: number) => (
+-                        <View key={idx} style={styles.tableRow}>
+-                            <View style={{ flex: 2, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+-                                <View style={[styles.tag, { backgroundColor: c.color || '#000', paddingVertical: 4, paddingHorizontal: 8 }]}>
+-                                    <Ionicons name={c.icon as any} size={12} color="#FFF" />
+-                                    <Text style={styles.tagText}>{c.name}</Text>
++                    {categoryStats.map((c: any, idx: number) => {
++                        const isMainCategory = !c.parentId;
++                        if (!isMainCategory && !expandedCategories[c.parentId]) return null;
++
++                        return (
++                            <Pressable 
++                                key={idx} 
++                                style={[styles.tableRow, isMainCategory && { backgroundColor: expandedCategories[c.id] ? BW.soft : 'transparent' }]} 
++                                onPress={() => { if (isMainCategory) toggleCategory(c.id); }}
++                            >
++                                <View style={{ flex: 2, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: c.parentId ? 24 : 0 }}>
++                                    {c.parentId && <Ionicons name="return-down-forward" size={14} color="#999" style={{ marginRight: -4 }} />}
++                                    <View style={[styles.tag, { 
++                                        backgroundColor: c.color ? (c.color.length === 7 ? c.color + '26' : c.color) : BW.soft,
++                                        paddingVertical: isMainCategory ? 8 : 6,
++                                        paddingHorizontal: isMainCategory ? 12 : 10,
++                                        borderWidth: 0,
++                                        borderRadius: 999
++                                    }]}>
++                                        <Ionicons name={c.icon as any} size={isMainCategory ? 16 : 14} color={c.color || BW.text} />
++                                        <ThemeText style={[styles.tagText, { color: c.color || BW.text, fontSize: isMainCategory ? 13 : 12 }]}>{c.name}</ThemeText>
++                                    </View>
+                                 </View>
+-                            </View>
+-                            <Text style={[styles.td, { flex: 1, textAlign: 'center', fontWeight: '800' }]}>{c.count}</Text>
+-                        </View>
+-                    ))}
++                                <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
++                                    <ThemeText style={[styles.td, { textAlign: 'right', fontWeight: '800' }]}>{c.count}</ThemeText>
++                                    {isMainCategory && (
++                                        <Ionicons name={expandedCategories[c.id] ? "chevron-up" : "chevron-down"} size={16} color={BW.muted} />
++                                    )}
++                                    {!isMainCategory && <View style={{ width: 16 }} />}
++                                </View>
++                            </Pressable>
++                        );
++                    })}
+                     {categoryStats.length === 0 && (
+                         <View style={{ padding: 16, alignItems: 'center' }}>
+-                            <Text style={styles.infoText}>No categories setup for this project.</Text>
++                            <ThemeText style={styles.infoText}>No categories setup for this project.</ThemeText>
+                         </View>
+                     )}
+                 </View>
+ 
+-                {/* PENDING JOIN REQUESTS */}
++                {/* PENDING Join Requests */}
+                 {isAdmin && joinRequests.length > 0 && (
+                     <>
+                         <View style={[styles.sectionHeader, { marginTop: 30 }]}>
+                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+-                                <Text style={styles.sectionTitle}>Join Requests</Text>
++                                <ThemeText style={styles.sectionTitle}>Join Requests</ThemeText>
+                                 <View style={{
+                                     backgroundColor: '#FF3B30',
+                                     borderRadius: 10,
+                                     paddingHorizontal: 6,
+                                     paddingVertical: 2
+                                 }}>
+-                                    <Text style={{ color: '#FFF', fontSize: 11, fontWeight: '800' }}>
++                                    <ThemeText style={{ color: '#FFF', fontSize: 11, fontWeight: '800' }}>
+                                         {joinRequests.length} pending
+-                                    </Text>
++                                    </ThemeText>
+                                 </View>
+                             </View>
+                         </View>
+@@ -635,16 +961,16 @@ export default function ProjectInfo() {
+                                     <View style={{ flex: 2, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                         <UserAvatar uid={r.uid} size={28} />
+                                         <View style={{ flex: 1 }}>
+-                                            <Text style={{ fontWeight: '800', color: BW.text }} numberOfLines={1}>
++                                            <ThemeText style={{ fontWeight: '800', color: BW.text }} numberOfLines={1}>
+                                                 {r.displayName}
+-                                            </Text>
+-                                            <Text style={{ fontSize: 11, color: BW.muted }}>
++                                            </ThemeText>
++                                            <ThemeText style={{ fontSize: 11, color: BW.muted }}>
+                                                 ID: {r.uid.substring(0, 8)}
+-                                            </Text>
++                                            </ThemeText>
+                                         </View>
+                                     </View>
+                                     <View style={{ flex: 1.5, flexDirection: 'row', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
+-                                        <Pressable 
++                                        <Pressable
+                                             style={{
+                                                 backgroundColor: '#22C55E',
+                                                 borderRadius: 8,
+@@ -655,9 +981,9 @@ export default function ProjectInfo() {
+                                             }}
+                                             onPress={() => handleApproveRequest(r.uid, r.displayName)}
+                                         >
+-                                            <Text style={{ color: '#FFF', fontWeight: '800', fontSize: 12 }}>Approve</Text>
++                                            <ThemeText style={{ color: '#FFF', fontWeight: '800', fontSize: 12 }}>Approve</ThemeText>
+                                         </Pressable>
+-                                        <Pressable 
++                                        <Pressable
+                                             style={{
+                                                 backgroundColor: BW.soft,
+                                                 borderWidth: 1,
+@@ -670,7 +996,7 @@ export default function ProjectInfo() {
+                                             }}
+                                             onPress={() => handleRejectRequest(r.uid, r.displayName)}
+                                         >
+-                                            <Text style={{ color: BW.text, fontWeight: '700', fontSize: 12 }}>Reject</Text>
++                                            <ThemeText style={{ color: BW.text, fontWeight: '700', fontSize: 12 }}>Reject</ThemeText>
+                                         </Pressable>
+                                     </View>
+                                 </View>
+@@ -681,40 +1007,40 @@ export default function ProjectInfo() {
+ 
+                 {/* SECTION 4: CONTRIBUTORS */}
+                 <View style={[styles.sectionHeader, { marginTop: 30 }]}>
+-                    <Text style={styles.sectionTitle}>Contributors</Text>
++                    <ThemeText style={styles.sectionTitle}>Contributors</ThemeText>
+                     {isAdmin && (
+                         <Pressable style={styles.editBtn} onPress={() => setManageRolesModalVisible(true)}>
+                             <Ionicons name="people" size={14} color="#000" />
+-                            <Text style={styles.editBtnText}>Manage Role</Text>
++                            <ThemeText style={styles.editBtnText}>Manage Role</ThemeText>
+                         </Pressable>
+                     )}
+                 </View>
+ 
+                 <View style={styles.tableCard}>
+                     <View style={styles.tableHeader}>
+-                        <Text style={[styles.th, { flex: 1.5 }]} numberOfLines={1} adjustsFontSizeToFit>User</Text>
+-                        <Text style={[styles.th, { flex: 1.5 }]} numberOfLines={1} adjustsFontSizeToFit>Joined</Text>
+-                        <Text style={[styles.th, { flex: 1.2, textAlign: 'center' }]} numberOfLines={1} adjustsFontSizeToFit>Posts</Text>
+-                        <Text style={[styles.th, { flex: 2, paddingLeft: 4 }]} numberOfLines={1} adjustsFontSizeToFit>Role</Text>
+-                        <Text style={[styles.th, { flex: 1, textAlign: 'center' }]} numberOfLines={1} adjustsFontSizeToFit>Msg</Text>
++                        <ThemeText style={[styles.th, { flex: 1.5 }]} numberOfLines={1} adjustsFontSizeToFit>User</ThemeText>
++                        <ThemeText style={[styles.th, { flex: 1.5 }]} numberOfLines={1} adjustsFontSizeToFit>Joined</ThemeText>
++                        <ThemeText style={[styles.th, { flex: 1.2, textAlign: 'center' }]} numberOfLines={1} adjustsFontSizeToFit>Posts</ThemeText>
++                        <ThemeText style={[styles.th, { flex: 2, paddingLeft: 4 }]} numberOfLines={1} adjustsFontSizeToFit>Role</ThemeText>
++                        <ThemeText style={[styles.th, { flex: 1, textAlign: 'center' }]} numberOfLines={1} adjustsFontSizeToFit>Msg</ThemeText>
+                         {isAdmin && <View style={{ width: 30 }} />}
+                     </View>
+ 
+-                    {members.map(m => (
++                    {Members.map(m => (
+                         <View key={m.uid} style={styles.tableRow}>
+                             <View style={{ flex: 1.5, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                 <UserAvatar uid={m.uid} size={24} />
+-                                <Text style={[styles.td, { flex: 1 }]} numberOfLines={1}>
++                                <ThemeText style={[styles.td, { flex: 1 }]} numberOfLines={1}>
+                                     {m.uid === auth.currentUser?.uid ? "You" : (m.displayName || m.username || m.uid)}
+-                                </Text>
++                                </ThemeText>
+                             </View>
+-                            <Text style={[styles.td, { flex: 1.5 }]} numberOfLines={1}>{m.dateJoined}</Text>
+-                            <Text style={[styles.td, { flex: 1.2, textAlign: 'center', fontWeight: '800' }]}>{contributionsMap[m.uid] || 0}</Text>
++                            <ThemeText style={[styles.td, { flex: 1.5 }]} numberOfLines={1}>{m.dateJoined}</ThemeText>
++                            <ThemeText style={[styles.td, { flex: 1.2, textAlign: 'center', fontWeight: '800' }]}>{contributionsMap[m.uid] || 0}</ThemeText>
+                             <View style={{ flex: 2, justifyContent: 'center', paddingLeft: 4 }}>
+                                 <View style={[styles.roleBadge, m.role === 'owner' ? styles.roleOwner : m.role === 'admin' ? styles.roleAdmin : styles.roleMember]}>
+-                                    <Text style={[styles.roleBadgeText, m.role === 'owner' ? styles.roleOwnerText : m.role === 'admin' ? styles.roleAdminText : styles.roleMemberText]} numberOfLines={1} adjustsFontSizeToFit>
++                                    <ThemeText style={[styles.roleBadgeText, m.role === 'owner' ? styles.roleOwnerText : m.role === 'admin' ? styles.roleAdminText : styles.roleMemberText]} numberOfLines={1} adjustsFontSizeToFit>
+                                         {m.role === 'collaborator' ? 'Member' : m.role}
+-                                    </Text>
++                                    </ThemeText>
+                                 </View>
+                             </View>
+                             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+@@ -739,7 +1065,7 @@ export default function ProjectInfo() {
+ 
+                 {/* SECTION 5: ANALYTICS */}
+                 <View style={[styles.sectionHeader, { marginTop: 30 }]}>
+-                    <Text style={styles.sectionTitle}>Analytics</Text>
++                    <ThemeText style={styles.sectionTitle}>Analytics</ThemeText>
+                 </View>
+ 
+                 <View style={styles.chartContainer}>
+@@ -750,9 +1076,9 @@ export default function ProjectInfo() {
+                                 style={[styles.chartToggleBtn, graphRange === r && styles.chartToggleBtnActive]}
+                                 onPress={() => setGraphRange(r as any)}
+                             >
+-                                <Text style={[styles.chartToggleText, graphRange === r && styles.chartToggleTextActive]}>
++                                <ThemeText style={[styles.chartToggleText, graphRange === r && styles.chartToggleTextActive]}>
+                                     {r.charAt(0).toUpperCase() + r.slice(1)}
+-                                </Text>
++                                </ThemeText>
+                             </Pressable>
+                         ))}
+                     </View>
+@@ -762,42 +1088,26 @@ export default function ProjectInfo() {
+                             const heightPct = Math.max((d.count / maxCount) * 100, d.count > 0 ? 5 : 0);
+                             return (
+                                 <View key={i} style={styles.barCol}>
+-                                    {d.count > 0 && <Text style={styles.barValue}>{d.count}</Text>}
++                                    {d.count > 0 && <ThemeText style={styles.barValue}>{d.count}</ThemeText>}
+                                     <View style={styles.barTrack}>
+                                         <View style={[styles.barFill, { height: `${heightPct}%` }]} />
+                                     </View>
+-                                    <Text style={styles.barLabel}>{d.label}</Text>
++                                    <ThemeText style={styles.barLabel}>{d.label}</ThemeText>
+                                 </View>
+                             );
+                         })}
+                     </View>
+                 </View>
+ 
+-
+-
+-                {/* SECTION: AI INSIGHTS */}
+-                <View style={[styles.sectionHeader, { marginTop: 30 }]}>
+-                    <Text style={styles.sectionTitle}>Deep Analytics AI</Text>
+-                    <Pressable style={styles.editBtn} onPress={handleGenerateInsights} disabled={generatingInsights}>
+-                        {generatingInsights ? (
+-                            <ActivityIndicator size="small" color="#000" />
+-                        ) : (
+-                            <>
+-                                <Ionicons name="sparkles" size={14} color="#000" />
+-                                <Text style={styles.editBtnText}>Generate</Text>
+-                            </>
+-                        )}
+-                    </Pressable>
+-                </View>
+-                {insights && (
+-                    <View style={[styles.tableCard, { padding: 20, backgroundColor: '#FAFAFA', borderWidth: 1, borderColor: '#EEE' }]}>
+-                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 6 }}>
+-                            <Ionicons name="sparkles" size={16} color="#0b57d0" />
+-                            <Text style={{ fontSize: 16, fontWeight: '900', color: '#111' }}>Gemini Analysis</Text>
+-                        </View>
+-                        <Text style={{ fontSize: 14, color: '#333', lineHeight: 22 }}>
+-                            {insights.replace(/\*\*(.*?)\*\*/g, '$1')}
+-                        </Text>
++                {isAdmin && (
++                    <View style={styles.exportRow}>
++                        <Pressable 
++                            style={[styles.exportBtn, { backgroundColor: '#F26522', borderColor: '#F26522' }]} 
++                            onPress={() => router.push({ pathname: '/project-analytics', params: { projectId } })}
++                        >
++                            <Ionicons name="sparkles" size={20} color="#FFF" />
++                            <ThemeText style={[styles.exportBtnText, { color: '#FFF' }]}>AI Analytics</ThemeText>
++                        </Pressable>
+                     </View>
+                 )}
+ 
+@@ -805,12 +1115,12 @@ export default function ProjectInfo() {
+                 {isAdmin && (
+                     <>
+                         <View style={[styles.sectionHeader, { marginTop: 30 }]}>
+-                            <Text style={styles.sectionTitle}>Data Export</Text>
++                            <ThemeText style={styles.sectionTitle}>Data Export</ThemeText>
+                         </View>
+                         <View style={styles.exportRow}>
+                             <Pressable style={styles.exportBtn} onPress={exportData}>
+                                 <Ionicons name="download-outline" size={20} color={BW.text} />
+-                                <Text style={styles.exportBtnText}>Data Export</Text>
++                                <ThemeText style={styles.exportBtnText}>Data Export</ThemeText>
+                             </Pressable>
+                         </View>
+                     </>
+@@ -818,6 +1128,69 @@ export default function ProjectInfo() {
+ 
+                 <View style={{ height: 60 }} />
+             </ScrollView>
++            {/* CHALLENGE MODAL */}
++            <Modal visible={challengeModalVisible} animationType="slide" transparent>
++                <KeyboardAvoidingView
++                    style={styles.modalOverlay}
++                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
++                >
++                    <View style={styles.modalContent}>
++                        <ThemeText style={styles.modalTitle}>Start Mapping Challenge</ThemeText>
++
++                        <ThemeText style={styles.label}>CHALLENGE TITLE</ThemeText>
++                        <ThemeTextInput 
++                            style={styles.input} 
++                            value={challengeTitle} 
++                            onChangeText={setChallengeTitle} 
++                            placeholder="e.g. Map all local parks!"
++                        />
++
++                        <ThemeText style={styles.label}>DURATION</ThemeText>
++                        <ThemeTextInput 
++                            style={styles.input} 
++                            value={challengeDuration} 
++                            onChangeText={setChallengeDuration} 
++                            keyboardType="numeric"
++                        />
++
++                        <ThemeText style={[styles.label, { marginTop: 16 }]}>UNIT</ThemeText>
++                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
++                            {['mins', 'hours', 'days', 'months'].map(unit => (
++                                <Pressable
++                                    key={unit}
++                                    style={{
++                                        flex: 1,
++                                        alignItems: 'center',
++                                        padding: 8,
++                                        marginHorizontal: 4,
++                                        borderRadius: 8,
++                                        backgroundColor: challengeUnit === unit ? BW.btn : BW.soft,
++                                        borderWidth: 1,
++                                        borderColor: challengeUnit === unit ? BW.btn : BW.border
++                                    }}
++                                    onPress={() => setChallengeUnit(unit as any)}
++                                >
++                                    <ThemeText style={{ 
++                                        color: challengeUnit === unit ? BW.btnText : BW.text,
++                                        fontWeight: challengeUnit === unit ? 'bold' : 'normal'
++                                    }}>
++                                        {unit}
++                                    </ThemeText>
++                                </Pressable>
++                            ))}
++                        </View>
++
++                        <View style={[styles.modalActions, { marginTop: 32 }]}>
++                            <Pressable style={styles.cancelBtn} onPress={() => setChallengeModalVisible(false)}>
++                                <ThemeText style={styles.cancelText}>Cancel</ThemeText>
++                            </Pressable>
++                            <Pressable style={styles.saveBtn} onPress={activateMappingChallenge}>
++                                <ThemeText style={styles.saveText}>Add</ThemeText>
++                            </Pressable>
++                        </View>
++                    </View>
++                </KeyboardAvoidingView>
++            </Modal>
+ 
+             {/* EDIT MODAL */}
+             <Modal visible={editModalVisible} animationType="slide" transparent>
+@@ -826,55 +1199,79 @@ export default function ProjectInfo() {
+                     behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                 >
+                     <View style={styles.modalContent}>
+-                        <Text style={styles.modalTitle}>Edit Project</Text>
++                        <ThemeText style={styles.modalTitle}>Edit Project</ThemeText>
+ 
+-                        <Text style={styles.label}>PROJECT NAME</Text>
+-                        <TextInput style={styles.input} value={editName} onChangeText={setEditName} />
++                        <ThemeText style={styles.label}>PROJECT NAME</ThemeText>
++                        <ThemeTextInput style={styles.input} value={editName} onChangeText={setEditName} />
+ 
+-                        <Text style={styles.label}>DESCRIPTION</Text>
+-                        <TextInput style={[styles.input, { height: 80, textAlignVertical: 'top' }]} multiline value={editDesc} onChangeText={setEditDesc} />
++                        <ThemeText style={styles.label}>DESCRIPTION</ThemeText>
++                        <ThemeTextInput style={[styles.input, { height: 80, textAlignVertical: 'top' }]} multiline value={editDesc} onChangeText={setEditDesc} />
+ 
+                         <View style={styles.switchRow}>
+-                            <Text style={styles.label}>PUBLIC PROJECT</Text>
++                            <ThemeText style={styles.label}>PUBLIC PROJECT</ThemeText>
+                             <Switch value={editIsPublic} onValueChange={setEditIsPublic} />
+                         </View>
+ 
+                         <View style={styles.modalActions}>
+                             <Pressable style={styles.cancelBtn} onPress={() => setEditModalVisible(false)}>
+-                                <Text style={styles.cancelText}>Cancel</Text>
++                                <ThemeText style={styles.cancelText}>Cancel</ThemeText>
+                             </Pressable>
+                             <Pressable style={styles.saveBtn} onPress={handleSaveEdit}>
+-                                <Text style={styles.saveText}>Save</Text>
++                                <ThemeText style={styles.saveText}>Save</ThemeText>
+                             </Pressable>
+                         </View>
+                     </View>
+                 </KeyboardAvoidingView>
+             </Modal>
+ 
++            {/* PAST CHALLENGES MODAL */}
++            <Modal visible={pastChallengesModalVisible} animationType="fade" transparent>
++                <View style={styles.modalOverlay}>
++                    <View style={[styles.modalContent, { maxHeight: '80%' }]}>
++                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 }}>
++                            <ThemeText style={styles.modalTitle}>Past Challenges</ThemeText>
++                            <Pressable onPress={() => setPastChallengesModalVisible(false)} hitSlop={10}>
++                                <Ionicons name="close" size={24} color={BW.text} />
++                            </Pressable>
++                        </View>
++                        <ScrollView>
++                            {pastChallenges.map(c => (
++                                <View key={c.id} style={{ marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: BW.border }}>
++                                    <ThemeText style={{ fontWeight: 'bold', color: BW.text }}>{c.title || 'Mapping Challenge'}</ThemeText>
++                                    <ThemeText style={{ fontSize: 12, color: BW.muted, marginTop: 4 }}>
++                                        Ended: {new Date(c.expiresAt).toLocaleDateString()}
++                                    </ThemeText>
++                                </View>
++                            ))}
++                        </ScrollView>
++                    </View>
++                </View>
++            </Modal>
++
+             {/* MANAGE ROLES MODAL */}
+             <Modal visible={manageRolesModalVisible} animationType="fade" transparent>
+                 <View style={styles.modalOverlay}>
+                     <View style={[styles.modalContent, { maxHeight: '80%', paddingBottom: insets.bottom + 24 }]}>
+                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 }}>
+-                            <Text style={styles.modalTitle}>Manage Roles</Text>
++                            <ThemeText style={styles.modalTitle}>Manage Roles</ThemeText>
+                             <Pressable onPress={() => setManageRolesModalVisible(false)} hitSlop={10}>
+                                 <Ionicons name="close" size={24} color="#000" />
+                             </Pressable>
+                         </View>
+ 
+                         <ScrollView>
+-                            {members.map(m => (
++                            {Members.map(m => (
+                                 <View key={m.uid} style={styles.manageRow}>
+                                     <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                                         <UserAvatar uid={m.uid} size={36} />
+                                         <View>
+-                                            <Text style={{ fontWeight: '800', color: '#111' }}>
++                                            <ThemeText style={{ fontWeight: '800', color: '#111' }}>
+                                                 {m.uid === auth.currentUser?.uid ? "You" : (m.displayName || m.username || `User ${m.uid}`)}
+-                                            </Text>
+-                                            <Text style={{ fontSize: 12, color: '#666', marginTop: 2, textTransform: 'capitalize' }}>
++                                            </ThemeText>
++                                            <ThemeText style={{ fontSize: 12, color: '#666', marginTop: 2, textTransform: 'capitalize' }}>
+                                                 {m.role === 'collaborator' ? 'Member' : m.role}
+                                                 {m.username && m.username !== m.displayName ? ` ΓÇó @${m.username}` : ''}
+-                                            </Text>
++                                            </ThemeText>
+                                         </View>
+                                     </View>
+ 
+@@ -884,9 +1281,9 @@ export default function ProjectInfo() {
+                                                 style={[styles.roleActionBtn, m.role === 'admin' && styles.roleActionBtnActive]}
+                                                 onPress={() => toggleRole(m.uid, m.role)}
+                                             >
+-                                                <Text style={[styles.roleActionText, m.role === 'admin' && styles.roleActionTextActive]}>
++                                                <ThemeText style={[styles.roleActionText, m.role === 'admin' && styles.roleActionTextActive]}>
+                                                     {m.role === 'admin' ? 'Demote to Member' : 'Make Admin'}
+-                                                </Text>
++                                                </ThemeText>
+                                             </Pressable>
+                                             <Pressable onPress={() => removeMember(m.uid)} style={{ padding: 6 }}>
+                                                 <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+@@ -901,7 +1298,7 @@ export default function ProjectInfo() {
+                             style={[styles.saveBtn, { flex: 0, marginTop: 20 }]}
+                             onPress={() => setManageRolesModalVisible(false)}
+                         >
+-                            <Text style={styles.saveText}>Done</Text>
++                            <ThemeText style={styles.saveText}>Done</ThemeText>
+                         </Pressable>
+                     </View>
+                 </View>
+@@ -963,7 +1360,7 @@ function ProjectLocationText({ area, fallbackName }: { area: any, fallbackName?:
+     return (
+         <View style={[styles.infoRow, { marginTop: 0, marginBottom: 8 }]}>
+             <Ionicons name="location" size={16} color={BW.muted} />
+-            <Text style={styles.infoText}>{placeName}</Text>
++            <ThemeText style={styles.infoText}>{placeName}</ThemeText>
+         </View>
+     );
+ }
+@@ -1044,3 +1441,14 @@ const getStyles = (BW: any) => StyleSheet.create({
+     exportBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 48, borderRadius: 14, backgroundColor: BW.soft, borderWidth: 1, borderColor: BW.border },
+     exportBtnText: { fontWeight: '800', color: BW.text },
+ });
++
++
++
++
++
++
++
++
++
++
++

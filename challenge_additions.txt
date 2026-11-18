@@ -1,0 +1,589 @@
++import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
++import { useTheme, DS } from '../components/ThemeContext';
++import { ThemeText } from '../components/ThemeText';
++import { ThemeTextInput } from '../components/ThemeTextInput';
++    const [Members, setMembers] = useState<any[]>([]);
++    
++    
++    const filteredRawEntries = useMemo(() => {
++        if (!project || !rawEntries) return rawEntries;
++        if (!project.isTimeStampEnabled || !project.timeStampDuration) return rawEntries;
++
++        const filtered: Record<string, any> = {};
++        const now = Date.now();
++        let cutoff = now;
++        if (project.timeStampDuration === '1_week') cutoff = now - 7 * 24 * 60 * 60 * 1000;
++        else if (project.timeStampDuration === '1_month') cutoff = now - 30 * 24 * 60 * 60 * 1000;
++        else if (project.timeStampDuration === '3_months') cutoff = now - 90 * 24 * 60 * 60 * 1000;
++        else if (project.timeStampDuration === '1_year') cutoff = now - 365 * 24 * 60 * 60 * 1000;
++
++        for (const key in rawEntries) {
++            const entry = rawEntries[key];
++            const entryDate = new Date(entry.createdAt || entry.timestamp).getTime();
++            if (isNaN(entryDate) || entryDate >= cutoff) {
++                filtered[key] = entry;
++            }
++        }
++        return filtered;
++    }, [rawEntries, project]);
++
++    const contributionsMap = useMemo(() => {
++        const counts: Record<string, number> = {};
++        for (const entryId in filteredRawEntries) {
++            const authorId = filteredRawEntries[entryId].createdBy || filteredRawEntries[entryId].userId;
++            if (authorId) {
++                counts[authorId] = (counts[authorId] || 0) + 1;
++            }
++        }
++        return counts;
++    }, [filteredRawEntries]);
++
++    const [Insights, setInsights] = useState<string | null>(null);
++    
++    // Mapping Challenge State
++    const [challengeModalVisible, setChallengeModalVisible] = useState(false);
++    const [challengeTitle, setChallengeTitle] = useState("");
++    const [challengeDuration, setChallengeDuration] = useState("1");
++    const [challengeUnit, setChallengeUnit] = useState<"mins" | "hours" | "days" | "months">("days");
++    const [activeChallengeId, setActiveChallengeId] = useState<string | null>(null);
++    const [activeChallenge, setActiveChallenge] = useState<any>(null);
++    const [pastChallengesCount, setPastChallengesCount] = useState(0);
++    const [pastChallenges, setPastChallenges] = useState<any[]>([]);
++    const [pastChallengesModalVisible, setPastChallengesModalVisible] = useState(false);
++    const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
++
++    const toggleCategory = (id: string) => {
++        setExpandedCategories(prev => ({ ...prev, [id]: !prev[id] }));
++    };
++        const entries = Object.values(filteredRawEntries).map(e => ({
++    }, [filteredRawEntries, graphRange]);
++        const stats: Record<string, { id: string, count: number, name: string, icon: string, color: string, parentId?: string }> = {};
++            const cats = Array.isArray(project.categories) 
++                ? project.categories 
++                : Object.entries(project.categories).map(([k, v]: [string, any]) => ({ id: k, ...v }));
++            cats.forEach((c: any) => {
++                const nameKey = (c.name || c.label || "").toLowerCase();
++                if (nameKey) {
++                    stats[nameKey] = { id: c.id || nameKey, count: 0, name: c.name || c.label, icon: c.icon, color: c.color, parentId: c.parentId };
++                }
++        Object.values(filteredRawEntries).forEach((e: any) => {
++            const catName = (e.category || e.categoryId || "").toLowerCase();
++            if (catName && stats[catName]) {
++                stats[catName].count++;
++            }
++            if (e.tags && Array.isArray(e.tags)) {
++                e.tags.forEach((t: any) => {
++                    const tName = (t.name || t.label || "").toLowerCase();
++                    if (tName && stats[tName]) {
++                        stats[tName].count++;
++                    }
++                });
++        
++        const rawStats = Object.values(stats);
++        
++        // Normalize parentId to always be the parent's actual ID
++        rawStats.forEach(t => {
++            if (t.parentId) {
++                const parentByName = rawStats.find(p => p.id === t.parentId || p.name.toLowerCase() === t.parentId!.toLowerCase());
++                if (parentByName) {
++                    t.parentId = parentByName.id;
++                }
++            }
++        });
++
++        const parents = rawStats.filter(t => !t.parentId);
++        parents.sort((a, b) => b.count - a.count);
++        
++        const sorted: typeof rawStats = [];
++        parents.forEach(p => {
++          sorted.push(p);
++          if (p.id) {
++            const children = rawStats.filter(t => t.parentId === p.id);
++            children.sort((a, b) => b.count - a.count);
++            sorted.push(...children);
++          }
++        });
++        rawStats.forEach(t => {
++          if (!sorted.includes(t)) sorted.push(t);
++        });
++        
++        return sorted;
++    }, [project?.categories, filteredRawEntries]);
++                const myRole = data.Members?.[currentUid] || "member";
++                if (data.Members) {
++                    for (const [uid, role] of Object.entries(data.Members)) {
++
++                
++    const [isDeleting, setIsDeleting] = useState(false);
++
++    const handleDeleteProject = async () => {
++        if (!projectId) return;
++        setIsDeleting(true);
++        try {
++            const { ProjectService } = require('../src/services/ProjectService');
++            await ProjectService.deleteProjectEverywhere(projectId as string);
++            
++            try {
++                const AsyncStorage = require('@react-native-async-storage/async-storage').default;
++                const lastActive = await AsyncStorage.getItem("lastActiveProject");
++                if (lastActive === projectId) {
++                    await AsyncStorage.removeItem("lastActiveProject");
++                }
++                const existing = await AsyncStorage.getItem("projects");
++                if (existing) {
++                    const localProjects = JSON.parse(existing);
++                    const updated = localProjects.filter((lp: any) => lp.id !== projectId && lp.key !== projectId);
++                    await AsyncStorage.setItem("projects", JSON.stringify(updated));
++                }
++            } catch (e) {
++                console.warn("Storage clean up failed", e);
++            }
++
++            if (Platform.OS === 'web') {
++                window.alert("Project deleted.");
++            } else {
++                Alert.alert("Success", "Project deleted successfully.");
++            }
++            router.replace("/(tabs)/library");
++        } catch (e: any) {
++            if (Platform.OS === 'web') {
++                window.alert("Failed to delete project: " + e.message);
++            } else {
++                Alert.alert("Error", "Failed to delete project: " + e.message);
++            }
++        } finally {
++            setIsDeleting(false);
++        }
++    };
++
++                        await remove(ref(db, `projects/${projectId}/Members/${uid}`));
++            await set(ref(db, `projects/${projectId}/Members/${uid}`), newRole);
++            await set(ref(db, `projects/${projectId}/Members/${reqUid}`), "collaborator");
++            await set(ref(db, `users/${reqUid}/joinedProjects/${projectId}`), {
++                role: "collaborator",
++                title: project?.name || "Shared Project"
++            let csvContent = "User Name,Entry Description,Categories,Main Category,Time Stamp,Location,Image URL\n";
++            const cats = Array.isArray(project.categories) ? project.categories : Object.values(project.categories || {});
++            const catMap = new Map();
++            cats.forEach((c: any) => {
++                if (c && (c.id || c.name || c.label)) {
++                    catMap.set((c.name || c.label || c.id).toLowerCase(), c);
++                }
++            for (const [entryId, entry] of Object.entries(filteredRawEntries)) {
++                const uid = entry.createdBy || entry.userId;
++                const member = Members.find(m => m.uid === uid);
++                const userName = member ? (member.displayName || member.username || uid) : (uid || "");
++                const description = entry.description || "";
++                const category = entry.category || "";
++                const imageUrl = entry.imageUrl || "";
++                let formattedTime = "";
++                const rawTime = entry.createdAt || entry.timestamp || entry.date || "";
++                if (rawTime) {
++                    const dateObj = new Date(typeof rawTime === 'string' && !isNaN(Number(rawTime)) ? Number(rawTime) : rawTime);
++                    if (!isNaN(dateObj.getTime())) {
++                        formattedTime = dateObj.toLocaleString(); // converts to local date/time format
++                    } else {
++                        formattedTime = rawTime.toString();
++                    }
++                }
++
++                const latitude = entry.latitude !== undefined ? entry.latitude : (entry.location?.latitude || "");
++                const longitude = entry.longitude !== undefined ? entry.longitude : (entry.location?.longitude || "");
++                const location = latitude !== "" && longitude !== "" ? `${latitude}, ${longitude}` : "";
++
++                let mainCategory = "";
++                const catLower = category.toLowerCase();
++                const matchedCat = catMap.get(catLower) || cats.find((c:any) => (c.name || c.label || "").toLowerCase() === catLower);
++                if (matchedCat && matchedCat.parentId) {
++                    const parent = catMap.get(matchedCat.parentId.toLowerCase()) || cats.find((c:any) => c.id === matchedCat.parentId || (c.name || c.label || "").toLowerCase() === matchedCat.parentId.toLowerCase());
++                    if (parent) {
++                        mainCategory = parent.name || parent.label || "";
++                    } else {
++                        mainCategory = matchedCat.parentId;
++                    }
++                } else if (matchedCat && !matchedCat.parentId) {
++                    mainCategory = category;
++                }
++
++                csvContent += `"${userName.replace(/"/g, '""')}","${description.replace(/"/g, '""')}","${category.replace(/"/g, '""')}","${mainCategory.replace(/"/g, '""')}","${formattedTime}","${location}","${imageUrl.replace(/"/g, '""')}"\n`;
++    useEffect(() => {
++        if (!projectId) return;
++        const challengesRef = ref(db, `projects/${projectId}/activeChallenges`);
++        const unsub = onValue(challengesRef, (snap) => {
++            if (snap.exists()) {
++                const val = snap.val();
++                let active = null;
++                let activeObj = null;
++                let pastCount = 0;
++                let pastList: any[] = [];
++                for (const key of Object.keys(val)) {
++                    if (val[key].status === 'active' && val[key].expiresAt > Date.now()) {
++                        active = key;
++                        activeObj = { id: key, ...val[key] };
++                    } else {
++                        pastCount++;
++                        pastList.push({ id: key, ...val[key] });
++                    }
++                }
++                setActiveChallengeId(active);
++                setActiveChallenge(activeObj);
++                setPastChallengesCount(pastCount);
++                setPastChallenges(pastList);
++            } else {
++                setActiveChallengeId(null);
++                setActiveChallenge(null);
++                setPastChallengesCount(0);
++                setPastChallenges([]);
++            }
++        });
++        return () => unsub();
++    }, [projectId]);
++
++    const cancelMappingChallenge = async () => {
++        if (!projectId || !activeChallengeId) return;
++        Alert.alert("Cancel Challenge", "Are you sure you want to end the active mapping challenge?", [
++            { text: "No", style: "cancel" },
++            {
++                text: "Yes, End It",
++                style: "destructive",
++                onPress: async () => {
++                    try {
++                        await update(ref(db, `projects/${projectId}/activeChallenges/${activeChallengeId}`), {
++                            status: "cancelled",
++                            expiresAt: Date.now()
++                        });
++                        Alert.alert("Success", "Challenge ended.");
++                    } catch (e: any) {
++                        Alert.alert("Error", "Could not end challenge: " + e.message);
++                    }
++                }
++            }
++        ]);
++    };
++
++    const activateMappingChallenge = async () => {
++        if (!projectId) return;
++        const pushId = Date.now().toString();
++        
++        let multiplier = 1000 * 60; // default mins
++        if (challengeUnit === "hours") multiplier = 1000 * 60 * 60;
++        else if (challengeUnit === "days") multiplier = 1000 * 60 * 60 * 24;
++        else if (challengeUnit === "months") multiplier = 1000 * 60 * 60 * 24 * 30; // roughly 30 days
++        
++        const durationValue = parseFloat(challengeDuration) || 1;
++        const expirationMs = Date.now() + (durationValue * multiplier);
++        
++        try {
++            // Write to activeChallenges
++            await set(ref(db, `projects/${projectId}/activeChallenges/${pushId}`), {
++                title: challengeTitle.trim() || "Mapping Challenge",
++                status: "active",
++                createdAt: Date.now(),
++                expiresAt: expirationMs
++            });
++            // Send notification to project Members
++            await set(ref(db, `projects/${projectId}/notifications/${pushId}`), {
++                title: challengeTitle.trim() || "Mapping Challenge",
++                message: "A new mapping challenge has started!",
++                type: "challenge",
++                timestamp: Date.now(),
++                senderName: "Project Admin",
++                senderId: auth.currentUser?.uid || "admin"
++            });
++            setChallengeModalVisible(false);
++            Alert.alert("Success", "Mapping Challenge activated!");
++        } catch (e: any) {
++            Alert.alert("Error", "Could not activate mapping challenge: " + e.message);
++        }
++    };
++
++                Alert.alert("Not Enough Data", "Add some entries to this project before generating Insights.");
++            Alert.alert("AI Error", e.message || "Failed to generate Insights.");
++    const totalPosts = Object.keys(filteredRawEntries).length;
++    const activeMembers = Members.filter(m => contributionsMap[m.uid] > 0).length;
++            const memberObj = Members.find(m => m.uid === uid);
++                <ThemeText style={styles.headerTitle}>Dashboard</ThemeText>
++                    <View style={{ position: 'relative' }}>
++                        {project.image && <Image source={{ uri: project.image }} style={styles.bannerImage} />}
++                        <View style={{ position: 'absolute', bottom: 12, right: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
++                            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.65)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, gap: 4 }}>
++                                <Ionicons name="people-outline" size={14} color="#fff" />
++                                <ThemeText style={{ color: '#fff', fontSize: 12, fontFamily: DS.typography.chip.fontFamily }}>
++                                    {Members.length}
++                                </ThemeText>
++                            </View>
++                            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.65)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, gap: 4 }}>
++                                <Ionicons name="location-outline" size={14} color="#fff" />
++                                <ThemeText style={{ color: '#fff', fontSize: 12, fontFamily: DS.typography.chip.fontFamily }}>
++                                    {totalPosts}
++                                </ThemeText>
++                            </View>
++                        </View>
++                    </View>
++                        {/* Title and stats summary */}
++                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
++                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, paddingRight: 8 }}>
++                                <ThemeText style={{ ...DS.typography.h1, color: BW.text }} numberOfLines={2}>{project.name}</ThemeText>
++                        </View>
++
++                        {/* Location & Time first */}
++                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
++                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, flex: 1, paddingRight: 8 }}>
++                                <Ionicons name="location" size={13} color={BW.muted} />
++                                <ProjectLocationText area={project.area} fallbackName={project.locationName} />
++                            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: (project.color || '#0b57d0') + '1A', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, gap: 4 }}>
++                                <Ionicons name={project.isPublic ? "globe-outline" : "lock-closed-outline"} size={11} color={project.color || '#0b57d0'} />
++                                <ThemeText style={{ fontSize: 10, fontFamily: DS.typography.chip.fontFamily, color: project.color || '#0b57d0', textTransform: 'uppercase' }}>
++                                    {project.isPublic ? 'Public' : 'Private'}
++                                </ThemeText>
++                        {/* Description second */}
++                        <ThemeText style={{ ...DS.typography.body, color: BW.muted, marginTop: 8 }}>
++                            {project.description || "No description provided."}
++                        </ThemeText>
++
++                        {/* Edit button */}
++                        {isAdmin && (
++                            <View style={{ flexDirection: 'row', marginTop: 12 }}>
++                                <Pressable style={[styles.editBtn, { backgroundColor: BW.btn, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 }]} onPress={() => router.push({ pathname: '/new-project', params: { projectId } })}>
++                                    <Ionicons name="pencil" size={14} color={BW.btnText} />
++                                    <ThemeText style={[styles.editBtnText, { color: BW.btnText, fontSize: 13 }]}>Edit</ThemeText>
++                                </Pressable>
++                            </View>
++                        )}
++
++                {/* CHALLENGES SECTION */}
++                {isAdmin && (
++                    <>
++                        <View style={[styles.sectionHeader, { marginTop: 30 }]}>
++                            <ThemeText style={styles.sectionTitle}>Challenges</ThemeText>
++                        </View>
++                        <View style={{ marginBottom: 12 }}>
++                            {activeChallengeId ? (
++                                <View>
++                                    {activeChallenge && (
++                                        <ThemeText style={{ textAlign: 'center', marginTop: 12, fontWeight: 'bold', color: BW.text }}>
++                                            Active Challenge: {activeChallenge.title}
++                                        </ThemeText>
++                                    )}
++                                    <Pressable 
++                                        style={[styles.exportBtn, { backgroundColor: '#F44336', borderColor: '#F44336', marginTop: 8 }]} 
++                                        onPress={cancelMappingChallenge}
++                                    >
++                                        <ThemeText style={[styles.exportBtnText, { color: '#FFF' }]}>Cancel Mapping Challenge</ThemeText>
++                                    </Pressable>
++                                </View>
++                            ) : (
++                                <View>
++                                    <Pressable 
++                                        style={[styles.exportBtn, { backgroundColor: '#4CAF50', borderColor: '#4CAF50', marginTop: 12 }]} 
++                                        onPress={() => setChallengeModalVisible(true)}
++                                    >
++                                        <ThemeText style={[styles.exportBtnText, { color: '#FFF' }]}>Start Mapping Challenge</ThemeText>
++                                    </Pressable>
++                                </View>
++                            )}
++                            {pastChallengesCount > 0 && (
++                                <Pressable onPress={() => setPastChallengesModalVisible(true)} style={{ marginTop: 16 }}>
++                                    <ThemeText style={{ textAlign: 'center', color: BW.text, fontSize: 12, fontWeight: 'bold' }}>
++                                        View {pastChallengesCount} past {pastChallengesCount === 1 ? 'challenge' : 'challenges'}
++                                    </ThemeText>
++                                </Pressable>
++                            )}
++                        </View>
++                    </>
++                )}
++
++                    <ThemeText style={styles.sectionTitle}>Categories</ThemeText>
++                        <ThemeText style={[styles.th, { flex: 2 }]} numberOfLines={1}>Category</ThemeText>
++                        <ThemeText style={[styles.th, { flex: 1, textAlign: 'center' }]} numberOfLines={1}>Entries</ThemeText>
++                    {categoryStats.map((c: any, idx: number) => {
++                        const isMainCategory = !c.parentId;
++                        if (!isMainCategory && !expandedCategories[c.parentId]) return null;
++
++                        return (
++                            <Pressable 
++                                key={idx} 
++                                style={[styles.tableRow, isMainCategory && { backgroundColor: expandedCategories[c.id] ? BW.soft : 'transparent' }]} 
++                                onPress={() => { if (isMainCategory) toggleCategory(c.id); }}
++                            >
++                                <View style={{ flex: 2, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: c.parentId ? 24 : 0 }}>
++                                    {c.parentId && <Ionicons name="return-down-forward" size={14} color="#999" style={{ marginRight: -4 }} />}
++                                    <View style={[styles.tag, { 
++                                        backgroundColor: c.color ? (c.color.length === 7 ? c.color + '26' : c.color) : BW.soft,
++                                        paddingVertical: isMainCategory ? 8 : 6,
++                                        paddingHorizontal: isMainCategory ? 12 : 10,
++                                        borderWidth: 0,
++                                        borderRadius: 999
++                                    }]}>
++                                        <Ionicons name={c.icon as any} size={isMainCategory ? 16 : 14} color={c.color || BW.text} />
++                                        <ThemeText style={[styles.tagText, { color: c.color || BW.text, fontSize: isMainCategory ? 13 : 12 }]}>{c.name}</ThemeText>
++                                    </View>
++                                <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 8 }}>
++                                    <ThemeText style={[styles.td, { textAlign: 'right', fontWeight: '800' }]}>{c.count}</ThemeText>
++                                    {isMainCategory && (
++                                        <Ionicons name={expandedCategories[c.id] ? "chevron-up" : "chevron-down"} size={16} color={BW.muted} />
++                                    )}
++                                    {!isMainCategory && <View style={{ width: 16 }} />}
++                                </View>
++                            </Pressable>
++                        );
++                    })}
++                            <ThemeText style={styles.infoText}>No categories setup for this project.</ThemeText>
++                {/* PENDING Join Requests */}
++                                <ThemeText style={styles.sectionTitle}>Join Requests</ThemeText>
++                                    <ThemeText style={{ color: '#FFF', fontSize: 11, fontWeight: '800' }}>
++                                    </ThemeText>
++                                            <ThemeText style={{ fontWeight: '800', color: BW.text }} numberOfLines={1}>
++                                            </ThemeText>
++                                            <ThemeText style={{ fontSize: 11, color: BW.muted }}>
++                                            </ThemeText>
++                                        <Pressable
++                                            <ThemeText style={{ color: '#FFF', fontWeight: '800', fontSize: 12 }}>Approve</ThemeText>
++                                        <Pressable
++                                            <ThemeText style={{ color: BW.text, fontWeight: '700', fontSize: 12 }}>Reject</ThemeText>
++                    <ThemeText style={styles.sectionTitle}>Contributors</ThemeText>
++                            <ThemeText style={styles.editBtnText}>Manage Role</ThemeText>
++                        <ThemeText style={[styles.th, { flex: 1.5 }]} numberOfLines={1} adjustsFontSizeToFit>User</ThemeText>
++                        <ThemeText style={[styles.th, { flex: 1.5 }]} numberOfLines={1} adjustsFontSizeToFit>Joined</ThemeText>
++                        <ThemeText style={[styles.th, { flex: 1.2, textAlign: 'center' }]} numberOfLines={1} adjustsFontSizeToFit>Posts</ThemeText>
++                        <ThemeText style={[styles.th, { flex: 2, paddingLeft: 4 }]} numberOfLines={1} adjustsFontSizeToFit>Role</ThemeText>
++                        <ThemeText style={[styles.th, { flex: 1, textAlign: 'center' }]} numberOfLines={1} adjustsFontSizeToFit>Msg</ThemeText>
++                    {Members.map(m => (
++                                <ThemeText style={[styles.td, { flex: 1 }]} numberOfLines={1}>
++                                </ThemeText>
++                            <ThemeText style={[styles.td, { flex: 1.5 }]} numberOfLines={1}>{m.dateJoined}</ThemeText>
++                            <ThemeText style={[styles.td, { flex: 1.2, textAlign: 'center', fontWeight: '800' }]}>{contributionsMap[m.uid] || 0}</ThemeText>
++                                    <ThemeText style={[styles.roleBadgeText, m.role === 'owner' ? styles.roleOwnerText : m.role === 'admin' ? styles.roleAdminText : styles.roleMemberText]} numberOfLines={1} adjustsFontSizeToFit>
++                                    </ThemeText>
++                    <ThemeText style={styles.sectionTitle}>Analytics</ThemeText>
++                                <ThemeText style={[styles.chartToggleText, graphRange === r && styles.chartToggleTextActive]}>
++                                </ThemeText>
++                                    {d.count > 0 && <ThemeText style={styles.barValue}>{d.count}</ThemeText>}
++                                    <ThemeText style={styles.barLabel}>{d.label}</ThemeText>
++                {isAdmin && (
++                    <View style={styles.exportRow}>
++                        <Pressable 
++                            style={[styles.exportBtn, { backgroundColor: '#F26522', borderColor: '#F26522' }]} 
++                            onPress={() => router.push({ pathname: '/project-analytics', params: { projectId } })}
++                        >
++                            <Ionicons name="sparkles" size={20} color="#FFF" />
++                            <ThemeText style={[styles.exportBtnText, { color: '#FFF' }]}>AI Analytics</ThemeText>
++                        </Pressable>
++                            <ThemeText style={styles.sectionTitle}>Data Export</ThemeText>
++                                <ThemeText style={styles.exportBtnText}>Data Export</ThemeText>
++            {/* CHALLENGE MODAL */}
++            <Modal visible={challengeModalVisible} animationType="slide" transparent>
++                <KeyboardAvoidingView
++                    style={styles.modalOverlay}
++                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
++                >
++                    <View style={styles.modalContent}>
++                        <ThemeText style={styles.modalTitle}>Start Mapping Challenge</ThemeText>
++
++                        <ThemeText style={styles.label}>CHALLENGE TITLE</ThemeText>
++                        <ThemeTextInput 
++                            style={styles.input} 
++                            value={challengeTitle} 
++                            onChangeText={setChallengeTitle} 
++                            placeholder="e.g. Map all local parks!"
++                        />
++
++                        <ThemeText style={styles.label}>DURATION</ThemeText>
++                        <ThemeTextInput 
++                            style={styles.input} 
++                            value={challengeDuration} 
++                            onChangeText={setChallengeDuration} 
++                            keyboardType="numeric"
++                        />
++
++                        <ThemeText style={[styles.label, { marginTop: 16 }]}>UNIT</ThemeText>
++                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
++                            {['mins', 'hours', 'days', 'months'].map(unit => (
++                                <Pressable
++                                    key={unit}
++                                    style={{
++                                        flex: 1,
++                                        alignItems: 'center',
++                                        padding: 8,
++                                        marginHorizontal: 4,
++                                        borderRadius: 8,
++                                        backgroundColor: challengeUnit === unit ? BW.btn : BW.soft,
++                                        borderWidth: 1,
++                                        borderColor: challengeUnit === unit ? BW.btn : BW.border
++                                    }}
++                                    onPress={() => setChallengeUnit(unit as any)}
++                                >
++                                    <ThemeText style={{ 
++                                        color: challengeUnit === unit ? BW.btnText : BW.text,
++                                        fontWeight: challengeUnit === unit ? 'bold' : 'normal'
++                                    }}>
++                                        {unit}
++                                    </ThemeText>
++                                </Pressable>
++                            ))}
++                        </View>
++
++                        <View style={[styles.modalActions, { marginTop: 32 }]}>
++                            <Pressable style={styles.cancelBtn} onPress={() => setChallengeModalVisible(false)}>
++                                <ThemeText style={styles.cancelText}>Cancel</ThemeText>
++                            </Pressable>
++                            <Pressable style={styles.saveBtn} onPress={activateMappingChallenge}>
++                                <ThemeText style={styles.saveText}>Add</ThemeText>
++                            </Pressable>
++                        </View>
++                    </View>
++                </KeyboardAvoidingView>
++            </Modal>
++                        <ThemeText style={styles.modalTitle}>Edit Project</ThemeText>
++                        <ThemeText style={styles.label}>PROJECT NAME</ThemeText>
++                        <ThemeTextInput style={styles.input} value={editName} onChangeText={setEditName} />
++                        <ThemeText style={styles.label}>DESCRIPTION</ThemeText>
++                        <ThemeTextInput style={[styles.input, { height: 80, textAlignVertical: 'top' }]} multiline value={editDesc} onChangeText={setEditDesc} />
++                            <ThemeText style={styles.label}>PUBLIC PROJECT</ThemeText>
++                                <ThemeText style={styles.cancelText}>Cancel</ThemeText>
++                                <ThemeText style={styles.saveText}>Save</ThemeText>
++            {/* PAST CHALLENGES MODAL */}
++            <Modal visible={pastChallengesModalVisible} animationType="fade" transparent>
++                <View style={styles.modalOverlay}>
++                    <View style={[styles.modalContent, { maxHeight: '80%' }]}>
++                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 }}>
++                            <ThemeText style={styles.modalTitle}>Past Challenges</ThemeText>
++                            <Pressable onPress={() => setPastChallengesModalVisible(false)} hitSlop={10}>
++                                <Ionicons name="close" size={24} color={BW.text} />
++                            </Pressable>
++                        </View>
++                        <ScrollView>
++                            {pastChallenges.map(c => (
++                                <View key={c.id} style={{ marginBottom: 16, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: BW.border }}>
++                                    <ThemeText style={{ fontWeight: 'bold', color: BW.text }}>{c.title || 'Mapping Challenge'}</ThemeText>
++                                    <ThemeText style={{ fontSize: 12, color: BW.muted, marginTop: 4 }}>
++                                        Ended: {new Date(c.expiresAt).toLocaleDateString()}
++                                    </ThemeText>
++                                </View>
++                            ))}
++                        </ScrollView>
++                    </View>
++                </View>
++            </Modal>
++
++                            <ThemeText style={styles.modalTitle}>Manage Roles</ThemeText>
++                            {Members.map(m => (
++                                            <ThemeText style={{ fontWeight: '800', color: '#111' }}>
++                                            </ThemeText>
++                                            <ThemeText style={{ fontSize: 12, color: '#666', marginTop: 2, textTransform: 'capitalize' }}>
++                                            </ThemeText>
++                                                <ThemeText style={[styles.roleActionText, m.role === 'admin' && styles.roleActionTextActive]}>
++                                                </ThemeText>
++                            <ThemeText style={styles.saveText}>Done</ThemeText>
++            <ThemeText style={styles.infoText}>{placeName}</ThemeText>
++
++
++
++
++
++
++
++
++
++
++
